@@ -1,0 +1,22 @@
+services:
+  tileserver-gl:
+    image: tileserver-gl-api:latest
+    container_name: ts-map-api
+    restart: always
+    user: root
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    ports:
+      - 8080:8080
+    volumes:
+      - .:/data
+    command:
+      - "-l"
+      - "output.log"
+    deploy:
+      resources:
+        limits:
+          memory: 8G 

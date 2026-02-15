@@ -20,3 +20,5 @@ config.json
 *.mbtiles
 styles
 fonts
+.env
+output.log
