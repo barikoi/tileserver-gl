@@ -23,6 +23,7 @@ import {
   isValidHttpUrl,
   isValidRemoteUrl,
 } from './utils.js';
+import { authMiddleware } from './middleware/index.js';
 
 import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -169,6 +170,9 @@ async function start(opts) {
   if (opts.cors) {
     app.use(cors());
   }
+
+  // Authentication middleware
+  app.use(authMiddleware);
 
   app.use('/data/', serve_data.init(options, serving.data, opts));
   app.use('/files/', express.static(paths.files));

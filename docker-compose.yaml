@@ -1,7 +1,7 @@
 services:
   tileserver-gl:
-    image: tileserver-gl-api:latest
-    container_name: ts-map-api
+    image: tileserver-gl:local
+    container_name: tileserver-gl
     restart: always
     user: root
     build:
