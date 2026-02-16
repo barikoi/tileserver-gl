@@ -119,7 +119,7 @@ init: function (options, repo, programOpts) {
 ┌─────────────────────────────────────────────────────────────┐
 │                    Main App (server.js)                     │
 │                                                             │
-│  Middleware: trust proxy, morgan, cors                      │
+│  Middleware: trust proxy, morgan, cors, auth                │
 │  Routes: /styles.json, /data.json, /health, /              │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -563,13 +563,14 @@ gzipP(data)        // Gzip buffer
 ### Tile Request Flow
 
 ```
-Client Request: GET /data/v3/10/512/384.pbf
+Client Request: GET /data/v3/10/512/384.pbf?key=xxx
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Express App (server.js)                                    │
 │  - CORS check                                               │
 │  - Logging (morgan)                                         │
+│  - Auth middleware (API key validation)                     │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ▼
@@ -791,6 +792,64 @@ paths.fonts = path.resolve(paths.root, paths.fonts || '');
 
 ## Middleware Stack
 
+### Custom Middleware (src/middleware/)
+
+#### `src/middleware/auth.js` (Authentication)
+**Purpose:** API key validation with external auth service and in-memory caching
+
+**Implementation:**
+```javascript
+// Environment Variables:
+// - AUTH_BASE_URL: Base URL to auth API (e.g., https://api.example.com)
+
+// In-memory cache (5-minute TTL)
+const authCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000;
+
+// Public paths (no auth required)
+const PUBLIC_PATHS = ['/', '/index.css', '/favicon.ico'];
+
+function shouldSkipAuth(path) {
+  if (PUBLIC_PATHS.includes(path)) return true;
+  if (path.startsWith('/images/')) return true;  // All images public
+  return false;
+}
+
+export async function authMiddleware(req, res, next) {
+  if (shouldSkipAuth(req.path)) return next();
+
+  if (!req.query.key) {
+    return res.status(401).send('Missing access token');
+  }
+
+  const isValid = await checkKey(req.query.key);
+  if (!isValid) {
+    return res.status(401).send('Invalid access token');
+  }
+
+  next();
+}
+```
+
+**Public Paths (no auth):**
+| Path | Description |
+|------|-------------|
+| `/` | Index page |
+| `/index.css` | Stylesheet |
+| `/favicon.ico` | Favicon |
+| `/images/*` | All image assets (logo, markers, etc.) |
+
+**API Endpoint Required:**
+- `GET {AUTH_BASE_URL}/api/validation?api_key={key}`
+- Response: `{"is_valid": true}`
+
+#### `src/middleware/index.js` (Exports)
+```javascript
+export { authMiddleware } from './auth.js';
+```
+
+---
+
 ### Current Stack (in order)
 
 ```
@@ -812,8 +871,9 @@ Request → express.disable('x-powered-by')
 | 2 | `enable('trust proxy')` | server.js:54 | Trust X-Forwarded-* headers | ⚠️ Only safe behind trusted proxy |
 | 3 | `morgan(logFormat)` | server.js:60-68 | HTTP request logging | May log sensitive data (IPs, paths) |
 | 4 | `cors()` | server.js:169-171 | Cross-Origin Resource Sharing | ⚠️ Defaults to `*` (all origins) |
-| 5 | `express.static()` | server.js:678 | Serve static files | No auth, publicly accessible |
-| 6 | Sub-apps | server.js:173-182 | Route handling | Each has own middleware |
+| 5 | `authMiddleware` | server.js:175 | API key validation | ✅ Protects non-public routes |
+| 6 | `express.static()` | server.js:678 | Serve static files | Public assets |
+| 7 | Sub-apps | server.js:177-182 | Route handling | Each has own middleware |
 
 ### Morgan Logging (server.js:56-69)
 
@@ -872,6 +932,7 @@ app.use(express.json());  // For POST body parsing (elevation batch queries)
 | Hide X-Powered-By | server.js:46 | ✅ Implemented |
 | Trust Proxy | server.js:54 | ⚠️ Enabled (configurable) |
 | CORS | server.js:169 | ⚠️ Opt-in, defaults to `*` |
+| API Key Authentication | middleware/auth.js | ✅ Implemented |
 | Input Sanitization | Multiple | ✅ Removes `\n\r` |
 | Path Sanitization | serve_rendered.js:394 | ✅ Uses sanitize-filename |
 | Bounds Validation | serve_data.js:97 | ✅ Validates tile coords |
@@ -879,16 +940,29 @@ app.use(express.json());  // For POST body parsing (elevation batch queries)
 
 ### The `key` Parameter
 
-The codebase passes a `key` query parameter through URLs for tracking purposes:
+The codebase validates the `key` query parameter for API authentication:
 
 ```javascript
-// server.js:579-581
-const query = req.query.key
-  ? `?key=${encodeURIComponent(req.query.key)}`
-  : '';
+// middleware/auth.js
+export async function authMiddleware(req, res, next) {
+  if (shouldSkipAuth(req.path)) return next();
+
+  if (!req.query.key) {
+    return res.status(401).send('Missing access token');
+  }
+
+  const isValid = await checkKey(req.query.key);
+  if (!isValid) {
+    return res.status(401).send('Invalid access token');
+  }
+
+  next();
+}
 ```
 
-**Note:** This is currently NOT validated - it's passed through for URL tracking only.
+**Public routes** (no key required): `/`, `/index.css`, `/favicon.ico`, `/images/*`
+
+**Protected routes** require `?key=your_api_key` in the URL.
 
 ---
 
@@ -915,6 +989,7 @@ const query = req.query.key
                           │ - trust proxy     │
                           │ - morgan          │
                           │ - cors (opt)      │
+                          │ - auth            │
                           └─────────┬─────────┘
                                     │
          ┌──────────────────────────┼──────────────────────────┐
@@ -972,6 +1047,7 @@ node src/main.js -c config.json -p 8080 --verbose 2 --cors
 - `PORT` - Override default port
 - `BIND` - Override bind address
 - `UV_THREADPOOL_SIZE` - Thread pool size (auto-calculated)
+- `AUTH_BASE_URL` - Base URL for auth API (e.g., https://api.example.com)
 
 ### Test Commands
 ```bash

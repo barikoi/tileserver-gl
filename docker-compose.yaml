@@ -1,6 +1,6 @@
 services:
   tileserver-gl:
-    image: tileserver-gl:local
+    image: rilusmahmud/tileserver-gl:beta-0.1.0
     container_name: tileserver-gl
     restart: always
     user: root

@@ -84,8 +84,8 @@ services:
     environment:
       - TZ=Asia/Dhaka
       - NODE_ENV=production
-      - AUTH_API_URL=${AUTH_API_URL}
-      # Rate Limiting (optional)
+      - AUTH_BASE_URL=${AUTH_BASE_URL}
+      # Rate Limiting (optional - not yet implemented)
       # - RATE_LIMIT_WINDOW_MS=60000
       # - RATE_LIMIT_MAX=1000
     ports:
@@ -121,17 +121,20 @@ src/
 
 ## Implementation
 
-### Step 1: Authentication
+### Step 1: Authentication ✅ IMPLEMENTED
 
-**Create: `src/middleware/auth.js`**
+**File: `src/middleware/auth.js`**
 
 ```javascript
 /**
- * Authentication middleware
+ * Authentication middleware for TileServer GL
+ * Validates API keys against external auth service with in-memory caching
+ *
  * Environment Variables:
- * - AUTH_API_URL: Full URL to auth API
+ * - AUTH_BASE_URL: Base URL to auth API (e.g., https://api.example.com)
  */
 
+// In-memory cache for API key validation results
 const authCache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
@@ -149,28 +152,37 @@ function setCached(key, value) {
   authCache.set(key, { value, expiry: Date.now() + CACHE_TTL });
 }
 
-async function checkKey(api_key) {
-  const cached = getCached(api_key);
+async function checkKey(apiKey) {
+  const cached = getCached(apiKey);
   if (cached !== null) return cached;
 
   try {
-    const url = `${process.env.AUTH_API_URL}/validation?api_key=${api_key}`;
+    const url = `${process.env.AUTH_BASE_URL}/api/validation?api_key=${apiKey}`;
     const response = await fetch(url);
 
     if (!response.ok) return false;
 
     const data = await response.json();
-    setCached(api_key, data.is_valid);
+    setCached(apiKey, data.is_valid);
 
     return data.is_valid;
   } catch (error) {
-    console.error('Auth error:', error.message);
+    console.error('Auth validation error:', error.message);
     return cached ?? false;
   }
 }
 
+// Public paths (exact match)
+const PUBLIC_PATHS = ['/', '/index.css', '/favicon.ico'];
+
+function shouldSkipAuth(path) {
+  if (PUBLIC_PATHS.includes(path)) return true;
+  if (path.startsWith('/images/')) return true;
+  return false;
+}
+
 export async function authMiddleware(req, res, next) {
-  if (req.path === '/health') return next();
+  if (shouldSkipAuth(req.path)) return next();
 
   if (!req.query.key) {
     return res.status(401).send('Missing access token');
@@ -185,9 +197,15 @@ export async function authMiddleware(req, res, next) {
 }
 ```
 
+**Public Paths (no auth required):**
+- `/` - Index page
+- `/index.css` - Stylesheet
+- `/favicon.ico` - Favicon
+- `/images/*` - All image assets
+
 ---
 
-### Step 2: CORS (Origins from API)
+### Step 2: CORS (Origins from API) ⏳ PLANNED
 
 **Create: `src/middleware/cors.js`**
 
@@ -251,7 +269,7 @@ export async function corsMiddleware(req, res, next) {
 
 ---
 
-### Step 3: Security + Rate Limiting
+### Step 3: Security + Rate Limiting ⏳ PLANNED
 
 **Create: `src/middleware/security.js`**
 
@@ -291,7 +309,7 @@ export const securityMiddleware = [helmetMiddleware, rateLimiter];
 
 ---
 
-### Step 4: Cache Headers
+### Step 4: Cache Headers ⏳ PLANNED
 
 **Create: `src/middleware/cache.js`**
 
@@ -316,35 +334,38 @@ export function cacheMiddleware(req, res, next) {
 
 ---
 
-### Step 5: Export
+### Step 5: Export ✅ IMPLEMENTED
 
-**Create: `src/middleware/index.js`**
+**File: `src/middleware/index.js`**
 
 ```javascript
+/**
+ * Custom middleware for TileServer GL
+ */
+
 export { authMiddleware } from './auth.js';
-export { corsMiddleware } from './cors.js';
-export { securityMiddleware } from './security.js';
-export { cacheMiddleware } from './cache.js';
+// TODO: Add when implemented
+// export { corsMiddleware } from './cors.js';
+// export { securityMiddleware } from './security.js';
+// export { cacheMiddleware } from './cache.js';
 ```
 
 ---
 
-## Changes to server.js
+## Changes to server.js ✅ IMPLEMENTED
 
 ```javascript
-// === ADD AT TOP (~line 15) ===
-import { authMiddleware, corsMiddleware, securityMiddleware, cacheMiddleware } from './middleware/index.js';
+// === ADD AT TOP (line 26) ===
+import { authMiddleware } from './middleware/index.js';
 
-// === REMOVE (~line 169-171) ===
-// Delete existing CORS block
-
-// === ADD (~line 172) ===
-// === CUSTOM MIDDLEWARE ===
-app.use(cacheMiddleware);
-app.use(...securityMiddleware);
-app.use(corsMiddleware);
+// === ADD (line 174-175) ===
+// Authentication middleware
 app.use(authMiddleware);
-// === END ===
+
+// TODO: Add when implemented
+// app.use(corsMiddleware);
+// app.use(...securityMiddleware);
+// app.use(cacheMiddleware);
 ```
 
 ---
@@ -353,9 +374,9 @@ app.use(authMiddleware);
 
 ```bash
 # .env file (add to .gitignore)
-AUTH_API_URL=https://your-api.example.com
+AUTH_BASE_URL=https://your-api.example.com
 
-# Optional
+# Optional (for future rate limiting)
 RATE_LIMIT_WINDOW_MS=60000
 RATE_LIMIT_MAX=1000
 ```
@@ -376,22 +397,33 @@ Your API needs:
 
 | Endpoint | Response |
 |----------|----------|
-| `GET /validation?api_key={key}` | `{"is_valid": true}` |
+| `GET /api/validation?api_key={key}` | `{"is_valid": true}` |
 | `GET /origins` | `{"origins": ["https://domain1.com", "https://domain2.com"]}` |
 
 ---
 
 ## File Structure
 
+**Current (implemented):**
 ```
 src/
 ├── middleware/
-│   ├── index.js
-│   ├── auth.js
-│   ├── cors.js
-│   ├── security.js
-│   └── cache.js
-├── server.js           # 5-10 lines
+│   ├── index.js        ✅ Implemented
+│   └── auth.js         ✅ Implemented
+├── server.js           # Auth middleware added
+└── ...
+```
+
+**Planned:**
+```
+src/
+├── middleware/
+│   ├── index.js        ✅
+│   ├── auth.js         ✅
+│   ├── cors.js         ⏳ TODO
+│   ├── security.js     ⏳ TODO
+│   └── cache.js        ⏳ TODO
+├── server.js
 └── ...
 ```
 
