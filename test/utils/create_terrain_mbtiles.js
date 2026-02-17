@@ -11,6 +11,11 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/**
+ * Converts an elevation value to RGB components using Mapbox encoding.
+ * @param {number} elevation - The elevation value in meters.
+ * @returns {{r: number, g: number, b: number}} An object containing R, G, B components.
+ */
 function elevationToMapboxRGB(elevation) {
   // elevation = -10000 + (R * 65536 + G * 256 + B) * 0.1
   // (R * 65536 + G * 256 + B) = (elevation + 10000) / 0.1
@@ -21,6 +26,12 @@ function elevationToMapboxRGB(elevation) {
   return { r, g, b };
 }
 
+/**
+ * Creates a terrain tile image with the given elevation encoded in mapbox RGB format.
+ * @param {number} tileSize - The width and height of the tile in pixels.
+ * @param {number} elevation - The elevation value in meters.
+ * @returns {Buffer} The PNG buffer containing the terrain tile image.
+ */
 function createTerrainTile(tileSize, elevation) {
   const canvas = createCanvas(tileSize, tileSize);
   const ctx = canvas.getContext('2d');
@@ -33,6 +44,13 @@ function createTerrainTile(tileSize, elevation) {
   return canvas.toBuffer('image/png');
 }
 
+/**
+ * Runs a database query with the given SQL and parameters.
+ * @param {sqlite3.Database} db - The SQLite3 database instance.
+ * @param {string} sql - The SQL query to execute.
+ * @param {Array} params - The parameters for the SQL query.
+ * @returns {Promise<unknown>} A promise that resolves with the result of the query.
+ */
 function runDb(db, sql, params = []) {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function (err) {
@@ -42,6 +60,10 @@ function runDb(db, sql, params = []) {
   });
 }
 
+/**
+ * Creates a simple terrain mbtiles file for testing the elevation API.
+ * @param {string} outputPath - The file path where the mbtiles file will be saved.
+ */
 async function createTerrainMbtiles(outputPath) {
   const db = new sqlite3.Database(outputPath);
 

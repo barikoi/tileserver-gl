@@ -5,12 +5,25 @@
  */
 
 // Copy of patternToRegex from validation.js
+/**
+ * Converts a wildcard pattern to a regex for origin matching.
+ * @param {string} pattern - The wildcard pattern to convert (e.g., 'https://*.example.com')
+ * @returns {RegExp} A regex object for matching origins against the pattern
+ */
 function patternToRegex(pattern) {
-  const regex = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  const regex = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*');
   return new RegExp(`^${regex}$`, 'i');
 }
 
 // Copy of isOriginAllowed from validation.js
+/**
+ * Checks if an origin is allowed based on a list of allowed origin patterns.
+ * @param {string} origin - The origin to check (e.g., 'https://example.com')
+ * @param {string[]} allowedOrigins - Array of allowed origin patterns (supports wildcards)
+ * @returns {boolean} True if the origin is allowed, false otherwise
+ */
 function isOriginAllowed(origin, allowedOrigins) {
   if (!origin) return false;
 
@@ -100,7 +113,13 @@ console.log('\n=== Recommended Patterns ===\n');
 console.log('Scenario                                    Pattern');
 console.log('─'.repeat(70));
 console.log('Single domain                               https://example.com');
-console.log('All subdomains (app, www, api, etc.)        https://*.example.com');
+console.log(
+  'All subdomains (app, www, api, etc.)        https://*.example.com',
+);
 console.log('Local dev (any port)                        http://localhost:*');
-console.log('Local dev (specific port)                   http://localhost:3000');
-console.log('Everything on domain (subdomains + paths)   https://*.example.com/*');
+console.log(
+  'Local dev (specific port)                   http://localhost:3000',
+);
+console.log(
+  'Everything on domain (subdomains + paths)   https://*.example.com/*',
+);

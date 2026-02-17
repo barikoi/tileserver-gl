@@ -28,7 +28,9 @@ const IS_CHECK_ALLOWED_ORIGINS =
  */
 function patternToRegex(pattern) {
   // Escape special regex characters except *
-  const regex = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  const regex = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*');
 
   return new RegExp(`^${regex}$`, 'i');
 }
