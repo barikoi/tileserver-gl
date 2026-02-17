@@ -119,7 +119,7 @@ init: function (options, repo, programOpts) {
 ┌─────────────────────────────────────────────────────────────┐
 │                    Main App (server.js)                     │
 │                                                             │
-│  Middleware: trust proxy, morgan, cors, auth                │
+│  Middleware: trust proxy, morgan, validation                │
 │  Routes: /styles.json, /data.json, /health, /              │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -570,7 +570,7 @@ Client Request: GET /data/v3/10/512/384.pbf?key=xxx
 │  Express App (server.js)                                    │
 │  - CORS check                                               │
 │  - Logging (morgan)                                         │
-│  - Auth middleware (API key validation)                     │
+│  - Validation middleware (API key + CORS)                   │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ▼
@@ -794,44 +794,45 @@ paths.fonts = path.resolve(paths.root, paths.fonts || '');
 
 ### Custom Middleware (src/middleware/)
 
-#### `src/middleware/auth.js` (Authentication)
-**Purpose:** API key validation with external auth service and in-memory caching
+#### `src/middleware/validation.js` (API Key Validation + CORS)
+**Purpose:** API Key validation with external service and CORS handling with wildcard origin support
 
 **Implementation:**
 ```javascript
 // Environment Variables:
-// - AUTH_BASE_URL: Base URL to auth API (e.g., https://api.example.com)
+// - AUTH_BASE_URL: Base URL to validation API (e.g., https://api.example.com)
+// - ALLOWED_ORIGINS: JSON array of allowed origins (e.g., ["http://localhost:4000"])
+// - IS_CHECK_ALLOWED_ORIGINS: Set to false to allow all origins (default: true)
 
-// In-memory cache (5-minute TTL)
-const authCache = new Map();
-const CACHE_TTL = 5 * 60 * 1000;
-
-// Public paths (no auth required)
+// Public paths (no validation required)
 const PUBLIC_PATHS = ['/', '/index.css', '/favicon.ico'];
 
-function shouldSkipAuth(path) {
+function shouldSkipValidation(path) {
   if (PUBLIC_PATHS.includes(path)) return true;
   if (path.startsWith('/images/')) return true;  // All images public
   return false;
 }
 
-export async function authMiddleware(req, res, next) {
-  if (shouldSkipAuth(req.path)) return next();
+export async function validationMiddleware(req, res, next) {
+  if (shouldSkipValidation(req.path)) return next();
 
-  if (!req.query.key) {
-    return res.status(401).send('Missing access token');
+  const apiKey = req.query.key;
+  if (!apiKey) {
+    return res.status(401).json({ error: 'Missing API Key' });
   }
 
-  const isValid = await checkKey(req.query.key);
-  if (!isValid) {
-    return res.status(401).send('Invalid access token');
+  const result = await validateApiKey(apiKey);
+  if (!result.is_valid) {
+    return res.status(401).json({ error: 'Invalid API Key' });
   }
 
-  next();
+  // Apply CORS with validated origins
+  const corsMiddleware = createCorsMiddleware(result.origins);
+  corsMiddleware(req, res, next);
 }
 ```
 
-**Public Paths (no auth):**
+**Public Paths (no validation):**
 | Path | Description |
 |------|-------------|
 | `/` | Index page |
@@ -839,13 +840,24 @@ export async function authMiddleware(req, res, next) {
 | `/favicon.ico` | Favicon |
 | `/images/*` | All image assets (logo, markers, etc.) |
 
+**API Key:** Passed via `?key=xxx` query parameter.
+
+**Wildcard Origin Patterns (like Mapbox):**
+| Pattern | Matches |
+|---------|---------|
+| `https://*.example.com` | `https://app.example.com`, `https://www.example.com` |
+| `https://example.com/*` | `https://example.com/map`, `https://example.com/admin/dashboard` |
+| `https://*.example.com/*` | `https://app.example.com/map`, `https://www.example.com/any/path` |
+
 **API Endpoint Required:**
 - `GET {AUTH_BASE_URL}/api/validation?api_key={key}`
-- Response: `{"is_valid": true}`
+- Response: `{"is_valid": true, "allowed_origins": ["https://domain1.com", "https://*.domain2.com"]}`
+
+**Note:** In-memory caching removed - delegated to backend validation service.
 
 #### `src/middleware/index.js` (Exports)
 ```javascript
-export { authMiddleware } from './auth.js';
+export { validationMiddleware } from './validation.js';
 ```
 
 ---
@@ -856,7 +868,7 @@ export { authMiddleware } from './auth.js';
 Request → express.disable('x-powered-by')
         → express.enable('trust proxy')
         → morgan(logFormat) [if not test]
-        → cors() [if opts.cors]
+        → validationMiddleware (API Key + CORS)
         → express.static('public/resources')
         → Sub-apps (/data/, /styles/, fonts)
         → Template routes
@@ -870,10 +882,8 @@ Request → express.disable('x-powered-by')
 | 1 | `disable('x-powered-by')` | server.js:46 | Hide backend stack from response headers | Prevents server fingerprinting |
 | 2 | `enable('trust proxy')` | server.js:54 | Trust X-Forwarded-* headers | ⚠️ Only safe behind trusted proxy |
 | 3 | `morgan(logFormat)` | server.js:60-68 | HTTP request logging | May log sensitive data (IPs, paths) |
-| 4 | `cors()` | server.js:169-171 | Cross-Origin Resource Sharing | ⚠️ Defaults to `*` (all origins) |
-| 5 | `authMiddleware` | server.js:175 | API key validation | ✅ Protects non-public routes |
-| 6 | `express.static()` | server.js:678 | Serve static files | Public assets |
-| 7 | Sub-apps | server.js:177-182 | Route handling | Each has own middleware |
+| 4 | `validationMiddleware` | server.js:170 | API Key validation + CORS | ✅ Protects non-public routes with origin control |
+| 5 | Sub-apps | server.js:172-181 | Route handling | Each has own middleware |
 
 ### Morgan Logging (server.js:56-69)
 
@@ -895,18 +905,18 @@ app.use(morgan(logFormat, {
 
 **GDPR consideration:** Logs contain IP addresses. Consider anonymization for EU compliance.
 
-### CORS Configuration (server.js:169-171)
+### CORS Configuration (via validationMiddleware)
 
-```javascript
-if (opts.cors) {
-  app.use(cors());  // Uses default settings = Access-Control-Allow-Origin: *
-}
-```
+CORS is now handled by the `validationMiddleware` which:
+- Validates API Key first
+- Returns allowed origins from the validation API response
+- Supports wildcard origin patterns (like Mapbox)
+- Can be configured to allow all origins with `IS_CHECK_ALLOWED_ORIGINS=false`
 
-**Current behavior:**
-- **Disabled by default** (requires `--cors` flag)
-- **Allows all origins** when enabled (`*`)
-- **No credential support** configured
+**Configuration via environment variables:**
+- `IS_CHECK_ALLOWED_ORIGINS=true` - Validate origins against allowed list (default)
+- `IS_CHECK_ALLOWED_ORIGINS=false` - Allow all origins (`Access-Control-Allow-Origin: *`)
+- `ALLOWED_ORIGINS` - Fallback JSON array when API doesn't return `allowed_origins`
 
 
 ### Sub-app Middleware
@@ -931,38 +941,43 @@ app.use(express.json());  // For POST body parsing (elevation batch queries)
 |---------|----------|--------|
 | Hide X-Powered-By | server.js:46 | ✅ Implemented |
 | Trust Proxy | server.js:54 | ⚠️ Enabled (configurable) |
-| CORS | server.js:169 | ⚠️ Opt-in, defaults to `*` |
-| API Key Authentication | middleware/auth.js | ✅ Implemented |
+| API Key Authentication | middleware/validation.js | ✅ Implemented |
+| CORS with Origin Control | middleware/validation.js | ✅ Wildcard pattern support |
 | Input Sanitization | Multiple | ✅ Removes `\n\r` |
 | Path Sanitization | serve_rendered.js:394 | ✅ Uses sanitize-filename |
 | Bounds Validation | serve_data.js:97 | ✅ Validates tile coords |
 | Sprite Path Sanitization | serve_style.js:148 | ✅ Removes `../` |
 
-### The `key` Parameter
+### API Key Authentication
 
-The codebase validates the `key` query parameter for API authentication:
+The codebase validates API Keys via the `validationMiddleware`:
+
+**API Key:** Passed via `?key=xxx` query parameter.
 
 ```javascript
-// middleware/auth.js
-export async function authMiddleware(req, res, next) {
-  if (shouldSkipAuth(req.path)) return next();
+// middleware/validation.js
+export async function validationMiddleware(req, res, next) {
+  if (shouldSkipValidation(req.path)) return next();
 
-  if (!req.query.key) {
-    return res.status(401).send('Missing access token');
+  const apiKey = req.query.key;
+  if (!apiKey) {
+    return res.status(401).json({ error: 'Missing API Key' });
   }
 
-  const isValid = await checkKey(req.query.key);
-  if (!isValid) {
-    return res.status(401).send('Invalid access token');
+  const result = await validateApiKey(apiKey);
+  if (!result.is_valid) {
+    return res.status(401).json({ error: 'Invalid API Key' });
   }
 
-  next();
+  // Apply CORS with validated origins
+  const corsMiddleware = createCorsMiddleware(result.origins);
+  corsMiddleware(req, res, next);
 }
 ```
 
 **Public routes** (no key required): `/`, `/index.css`, `/favicon.ico`, `/images/*`
 
-**Protected routes** require `?key=your_api_key` in the URL.
+**Protected routes** require API Key via `?key=xxx` query parameter.
 
 ---
 
@@ -989,7 +1004,7 @@ export async function authMiddleware(req, res, next) {
                           │ - trust proxy     │
                           │ - morgan          │
                           │ - cors (opt)      │
-                          │ - auth            │
+                          │ - validation      │
                           └─────────┬─────────┘
                                     │
          ┌──────────────────────────┼──────────────────────────┐
@@ -1047,7 +1062,9 @@ node src/main.js -c config.json -p 8080 --verbose 2 --cors
 - `PORT` - Override default port
 - `BIND` - Override bind address
 - `UV_THREADPOOL_SIZE` - Thread pool size (auto-calculated)
-- `AUTH_BASE_URL` - Base URL for auth API (e.g., https://api.example.com)
+- `AUTH_BASE_URL` - Base URL for validation API (e.g., https://api.example.com)
+- `ALLOWED_ORIGINS` - JSON array of allowed CORS origins (e.g., `["http://localhost:4000"]`)
+- `IS_CHECK_ALLOWED_ORIGINS` - Set to false to allow all origins (default: true)
 
 ### Test Commands
 ```bash

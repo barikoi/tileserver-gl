@@ -6,7 +6,6 @@ import path from 'path';
 import fnv1a from '@sindresorhus/fnv1a';
 import chokidar from 'chokidar';
 import clone from 'clone';
-import cors from 'cors';
 import enableShutdown from 'http-shutdown';
 import express from 'express';
 import handlebars from 'handlebars';
@@ -23,7 +22,7 @@ import {
   isValidHttpUrl,
   isValidRemoteUrl,
 } from './utils.js';
-import { authMiddleware } from './middleware/index.js';
+import { validationMiddleware } from './middleware/index.js';
 
 import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -167,12 +166,8 @@ async function start(opts) {
 
   const data = clone(config.data || {});
 
-  if (opts.cors) {
-    app.use(cors());
-  }
-
-  // Authentication middleware
-  app.use(authMiddleware);
+  // Token validation middleware (handles validation + CORS)
+  app.use(validationMiddleware);
 
   app.use('/data/', serve_data.init(options, serving.data, opts));
   app.use('/files/', express.static(paths.files));
