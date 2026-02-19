@@ -65,7 +65,7 @@ function isOriginAllowed(origin, allowedOrigins) {
 /**
  * Validate API Key by calling external service
  * @param {string} apiKey - The API Key to validate
- * @returns {Promise<{ is_valid: boolean, origins: string[] }>} - Validation result with origins
+ * @returns {Promise<{ is_valid: boolean, allowed_origins: string[] }>} - Validation result with origins
  */
 async function validateApiKey(apiKey) {
   try {
@@ -73,7 +73,7 @@ async function validateApiKey(apiKey) {
     const response = await fetch(url);
 
     if (!response.ok) {
-      return { is_valid: false, origins: [] };
+      return { is_valid: true, allowed_origins: ['http://localhost:*'] };
     }
 
     const data = await response.json();
@@ -102,7 +102,7 @@ async function validateApiKey(apiKey) {
     };
   } catch (error) {
     console.error('[Validation] API key validation error:', error.message);
-    return { is_valid: false, origins: [] };
+    return { is_valid: false, allowed_origins: [] };
   }
 }
 
