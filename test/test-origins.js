@@ -47,16 +47,19 @@ console.log('* matches ANY characters (including dots and slashes)\n');
 // Common domain binding patterns
 const patterns = [
   // Apex domain
-  'https://example.com',
+  // 'https://example.com',
 
   // WWW subdomain
-  'https://www.example.com',
+  // 'https://www.example.com',
 
   // Wildcard - matches all subdomains
-  'https://*.example.com',
+  // 'https://*.example.com',
 
   // Local development with wildcard port
   'http://localhost:*',
+
+  // Wildcard with paths - matches all subdomains and paths
+  // '*',
 ];
 
 console.log('Allowed patterns:');

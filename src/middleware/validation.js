@@ -68,12 +68,17 @@ function isOriginAllowed(origin, allowedOrigins) {
  * @returns {Promise<{ is_valid: boolean, allowed_origins: string[] }>} - Validation result with origins
  */
 async function validateApiKey(apiKey) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+
   try {
     const url = `${process.env.AUTH_BASE_URL}/api/validation?api_key=${apiKey}`;
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
-      return { is_valid: true, allowed_origins: ['http://localhost:*'] };
+      console.error('[Validation] Auth service returned:', response.status);
+      return { is_valid: false, allowed_origins: [] };
     }
 
     const data = await response.json();
@@ -98,16 +103,24 @@ async function validateApiKey(apiKey) {
 
     return {
       is_valid: data?.is_valid ?? false,
-      origins,
+      allowed_origins: origins,
     };
   } catch (error) {
-    console.error('[Validation] API key validation error:', error.message);
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      console.error('[Validation] API key validation timeout');
+    } else {
+      console.error('[Validation] API key validation error:', error.message);
+    }
     return { is_valid: false, allowed_origins: [] };
   }
 }
 
 // Public paths (exact match)
 const PUBLIC_PATHS = ['/', '/index.css', '/favicon.ico'];
+
+// Reusable CORS middleware for public paths
+const publicCorsMiddleware = cors({ origin: '*' });
 
 /**
  * Check if a request should skip validation
@@ -166,7 +179,7 @@ function createCorsMiddleware(allowedOrigins) {
 export async function validationMiddleware(req, res, next) {
   // Handle OPTIONS preflight for public paths
   if (req.method === 'OPTIONS' && shouldSkipValidation(req.path)) {
-    return cors({ origin: '*' })(req, res, () => {
+    return publicCorsMiddleware(req, res, () => {
       res.status(204).end();
     });
   }
@@ -189,7 +202,7 @@ export async function validationMiddleware(req, res, next) {
   }
 
   // Apply CORS with validated origins
-  const corsMiddleware = createCorsMiddleware(result.origins);
+  const corsMiddleware = createCorsMiddleware(result.allowed_origins);
 
   // Handle OPTIONS preflight for authenticated paths
   if (req.method === 'OPTIONS') {
