@@ -14,9 +14,6 @@ services:
       - 8080:8080
     volumes:
       - .:/data
-    command:
-      - "-l"
-      - "output.log"
     deploy:
       resources:
         limits:

@@ -11,7 +11,7 @@ import express from 'express';
 import handlebars from 'handlebars';
 import { SphericalMercator } from '@mapbox/sphericalmercator';
 const mercator = new SphericalMercator();
-import morgan from 'morgan';
+import { httpLogger } from './logger.js';
 import { serve_data } from './serve_data.js';
 import { serve_style } from './serve_style.js';
 import { serve_font } from './serve_font.js';
@@ -54,18 +54,19 @@ async function start(opts) {
   app.enable('trust proxy');
 
   if (process.env.NODE_ENV !== 'test') {
-    const defaultLogFormat =
-      process.env.NODE_ENV === 'production' ? 'tiny' : 'dev';
-    const logFormat = opts.logFormat || defaultLogFormat;
-    app.use(
-      morgan(logFormat, {
-        stream: opts.logFile
-          ? fs.createWriteStream(opts.logFile, { flags: 'a' })
-          : process.stdout,
-        skip: (req, res) =>
-          opts.silent && (res.statusCode === 200 || res.statusCode === 304),
-      }),
-    );
+    // const defaultLogFormat =
+    // process.env.NODE_ENV === 'production' ? 'tiny' : 'dev';
+    // const logFormat = opts.logFormat || defaultLogFormat;
+    // app.use(
+    //   morgan(logFormat, {
+    //     stream: opts.logFile
+    //       ? fs.createWriteStream(opts.logFile, { flags: 'a' })
+    //       : process.stdout,
+    //     skip: (req, res) =>
+    //       opts.silent && (res.statusCode === 200 || res.statusCode === 304),
+    //   }),
+    // );
+    app.use(httpLogger);
   }
 
   let config = opts.config || null;
