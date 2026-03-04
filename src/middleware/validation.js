@@ -8,19 +8,27 @@
  * Supports wildcard origin patterns like Mapbox:
  * - https://*.example.com → matches https://app.example.com, https://www.example.com
  * - https://example.com/* → matches any path on example.com
- *
  * @requires cors
  * @requires module:app.config
- *
  * @example
  * // Environment Variables:
  * // AUTH_BASE_URL: Base URL to validation API (e.g., https://api.example.com)
- * // ALLOWED_ORIGINS: JSON array of allowed origins (e.g., ["http://localhost:4000"])
  * // IS_CHECK_ALLOWED_ORIGINS: Set to false to allow all origins (default: true)
  */
 
 import cors from 'cors';
 import { config } from '../app.config.js';
+import { logger } from '../logger.js';
+
+/**
+ * Get request-scoped logger or fallback to base logger
+ * Ensures logging works even if httpLogger hasn't initialized req.log
+ * @param {import('express').Request} req - Express request object
+ * @returns {import('pino').Logger} Logger instance with request context
+ */
+function getLogger(req) {
+  return req.log ?? logger;
+}
 
 /**
  * Reusable CORS middleware for skipped validation paths
@@ -42,7 +50,6 @@ const allowAllCorsMiddleware = cors({
  * Convert wildcard pattern to regex (Mapbox-style)
  *
  * Supports `*` which matches any characters including `/`
- *
  * @param {string} pattern - Wildcard pattern (e.g., https://*.example.com/*)
  * @returns {RegExp} Regex pattern for matching origins
  * @example
@@ -60,7 +67,6 @@ function patternToRegex(pattern) {
 
 /**
  * Check if origin matches allowed pattern (with wildcard support)
- *
  * @param {string} origin - Request origin (e.g., https://app.example.com)
  * @param {string[]} allowedOrigins - List of allowed origin patterns
  * @returns {boolean} True if origin is allowed, false otherwise
@@ -70,11 +76,17 @@ function patternToRegex(pattern) {
  *
  * isOriginAllowed('https://evil.com', ['https://*.example.com'])
  * // Returns false
+ *
+ * isOriginAllowed('https://any.domain.com', ['*'])
+ * // Returns true
  */
 function isOriginAllowed(origin, allowedOrigins) {
   if (!origin) return false;
 
   for (const pattern of allowedOrigins) {
+    // Wildcard allows all origins
+    if (pattern === '*') return true;
+
     // Exact match
     if (pattern === origin) return true;
 
@@ -94,7 +106,7 @@ function isOriginAllowed(origin, allowedOrigins) {
 
 /**
  * Validation result from API key validation
- * @typedef {Object} ValidationResult
+ * @typedef {object} ValidationResult
  * @property {boolean} is_valid - Whether the API key is valid
  * @property {string[]} allowed_origins - Combined list of global and key-specific allowed origins
  */
@@ -104,8 +116,8 @@ function isOriginAllowed(origin, allowedOrigins) {
  *
  * Makes a request to the validation API with timeout protection.
  * On failure (non-OK response, timeout, or network error), returns invalid result.
- *
  * @param {string} apiKey - The API Key to validate
+ * @param {import('express').Request} [req] - Express request object for request-scoped logging
  * @returns {Promise<ValidationResult>} Validation result with combined allowed origins
  * @throws {never} All errors are caught and return invalid result
  * @example
@@ -114,9 +126,10 @@ function isOriginAllowed(origin, allowedOrigins) {
  *   console.log('Allowed origins:', result.allowed_origins)
  * }
  */
-async function validateApiKey(apiKey) {
+async function validateApiKey(apiKey, req) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), config.auth.timeout);
+  const log = getLogger(req);
 
   try {
     const url = `${config.auth.baseUrl}/api/validation?api_key=${apiKey}`;
@@ -124,28 +137,28 @@ async function validateApiKey(apiKey) {
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      console.error('[Validation] Auth service returned:', response.status);
+      log.error(
+        { statusCode: response.status, apiKey: apiKey.substring(0, 8) + '...' },
+        'Auth service returned non-OK status',
+      );
       return { is_valid: false, allowed_origins: [] };
     }
 
     const data = await response.json();
 
-    // Always include global env origins + API response origins
-    const origins = [
-      ...config.cors.allowedOrigins,
-      ...(data?.allowed_origins || []),
-    ];
-
     return {
       is_valid: data?.is_valid ?? false,
-      allowed_origins: origins,
+      allowed_origins: data?.allowed_origins || [],
     };
   } catch (error) {
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
-      console.error('[Validation] API key validation timeout');
+      log.error(
+        { errorType: 'AbortError', timeout: config.auth.timeout },
+        'API key validation timeout',
+      );
     } else {
-      console.error('[Validation] API key validation error:', error.message);
+      log.error({ err: error }, 'API key validation error');
     }
     return { is_valid: false, allowed_origins: [] };
   }
@@ -156,7 +169,6 @@ async function validateApiKey(apiKey) {
  *
  * Static assets skip API key validation
  * Public paths (health endpoint) also skip validation
- *
  * @param {string} path - Request path (e.g., /styles/main.css)
  * @returns {boolean} True if should skip validation, false otherwise
  * @example
@@ -178,21 +190,23 @@ function shouldSkipValidation(path) {
 
 /**
  * Create CORS middleware with dynamic origin based on allowed origins
- *
  * @param {string[]} allowedOrigins - List of allowed origin patterns (can include wildcards)
+ * @param {import('express').Request} [req] - Express request object for request-scoped logging
  * @returns {import('express').RequestHandler} Express middleware handler
  * @example
  * const middleware = createCorsMiddleware(['https://*.example.com'])
  * app.use(middleware)
  */
-function createCorsMiddleware(allowedOrigins) {
+function createCorsMiddleware(allowedOrigins, req) {
   // Reuse cached instance when origin checking is disabled
   if (!config.cors.isCheckAllowedOrigins) {
     return allowAllCorsMiddleware;
   }
 
-  // Dynamic CORS needed - must create per-request (origins vary per API key)
-  return cors({
+  const log = getLogger(req);
+
+  // Create the CORS middleware
+  const corsMiddleware = cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (mobile apps, curl, server-to-server)
       if (!origin) return callback(null, true);
@@ -200,13 +214,27 @@ function createCorsMiddleware(allowedOrigins) {
       if (isOriginAllowed(origin, allowedOrigins)) {
         callback(null, true);
       } else {
-        console.warn(`[CORS] Blocked origin: ${origin}`);
-        callback(new Error('Not allowed by CORS'));
+        log.warn({ origin, allowedOrigins }, 'CORS: Blocked origin');
+        // Create a proper CORS error with status code
+        const corsError = new Error('Origin not allowed');
+        corsError.status = 403;
+        corsError.message = 'CORS policy: Origin not allowed';
+        callback(corsError);
       }
     },
     methods: ['GET', 'HEAD', 'OPTIONS'],
     allowedHeaders: ['Content-Type'],
   });
+
+  // Wrap to set res.locals.errorMessage for logging sync
+  return (req, res, next) => {
+    corsMiddleware(req, res, (err) => {
+      if (err && err.status === 403) {
+        res.locals.errorMessage = 'CORS policy: Origin not allowed';
+      }
+      next(err);
+    });
+  };
 }
 
 /**
@@ -217,18 +245,15 @@ function createCorsMiddleware(allowedOrigins) {
  * 2. Check for API key in query parameter `key`
  * 3. Validate API key against external service
  * 4. Apply CORS with combined allowed origins (global + key-specific)
- *
  * @param {import('express').Request} req - Express request object
  * @param {import('express').Response} res - Express response object
  * @param {import('express').NextFunction} next - Express next function
  * @returns {Promise<void>}
  * @throws {never} Responds with 401 for missing/invalid API key
- *
  * @example
  * // In your Express app:
  * import { validationMiddleware } from './middleware/validation.js'
  * app.use(validationMiddleware)
- *
  * @example
  * // Request with API key:
  * // GET /tiles/1/2/3.pbf?key=my-api-key
@@ -249,17 +274,19 @@ export async function validationMiddleware(req, res, next) {
   // Get API Key from query param
   const apiKey = req.query.key;
   if (!apiKey) {
+    res.locals.errorMessage = 'Missing API Key';
     return res.status(401).json({ error: 'Missing API Key' });
   }
 
-  // Validate API Key and get allowed origins
-  const result = await validateApiKey(apiKey);
+  // Validate API Key and get allowed origins (pass req for request-scoped logging)
+  const result = await validateApiKey(apiKey, req);
   if (!result.is_valid) {
+    res.locals.errorMessage = 'Invalid API Key';
     return res.status(401).json({ error: 'Invalid API Key' });
   }
 
-  // Apply CORS with validated origins
-  const corsMiddleware = createCorsMiddleware(result.allowed_origins);
+  // Apply CORS with validated origins (pass req for request-scoped logging)
+  const corsMiddleware = createCorsMiddleware(result.allowed_origins, req);
 
   // Handle OPTIONS preflight for authenticated paths
   if (req.method === 'OPTIONS') {

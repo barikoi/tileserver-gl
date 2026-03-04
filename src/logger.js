@@ -17,12 +17,20 @@ const logger = pino(transport);
 
 /**
  * Get standardized error messages for common HTTP status codes
- * @param {number} statusCode - HTTP status code
- * @returns {string} Standardized error message
+ * Checks res.locals.errorMessage first for custom messages from middleware
+ * @param {import('express').Response} res - Express response object
+ * @returns {string|null} Standardized error message
  */
-function getStandardErrorMessage(statusCode) {
+function getStandardErrorMessage(res) {
+  // If response has a custom error message from middleware, use it
+  if (res.locals?.errorMessage) {
+    return res.locals.errorMessage;
+  }
+
+  // Fallback to status code based messages
+  const statusCode = res.statusCode;
   if (statusCode === 401) return 'Missing API Key';
-  if (statusCode === 403) return 'Forbidden';
+  if (statusCode === 403) return 'CORS policy: Origin not allowed';
   if (statusCode >= 500) return 'Server Error';
   if (statusCode >= 200 && statusCode < 400) return 'Request Completed';
   return null;
@@ -36,10 +44,10 @@ const httpLogger = pinoHttp({
     return 'info';
   },
   customSuccessMessage: (_req, res) => {
-    return getStandardErrorMessage(res.statusCode);
+    return getStandardErrorMessage(res);
   },
   customErrorMessage: (_req, res) => {
-    return getStandardErrorMessage(res.statusCode);
+    return getStandardErrorMessage(res);
   },
 });
 
