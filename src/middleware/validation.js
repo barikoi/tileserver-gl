@@ -5,9 +5,9 @@
  * Validates API Key against external service (Redis caching handled by backend).
  * Also handles CORS based on allowed origins from validation response.
  *
- * Supports wildcard origin patterns like Mapbox:
- * - https://*.example.com → matches https://app.example.com, https://www.example.com
- * - https://example.com/* → matches any path on example.com
+ * Supports wildcard origin patterns (domain-only, no protocol):
+ * - *.example.com → matches https://app.example.com, http://www.example.com
+ * - example.com → matches https://example.com, http://example.com
  * @requires cors
  * @requires module:app.config
  * @example
@@ -47,34 +47,45 @@ const allowAllCorsMiddleware = cors({
 });
 
 /**
- * Convert wildcard pattern to regex (Mapbox-style)
- *
- * Supports `*` which matches any characters including `/`
- * @param {string} pattern - Wildcard pattern (e.g., https://*.example.com/*)
- * @returns {RegExp} Regex pattern for matching origins
- * @example
- * patternToRegex('https://*.example.com')
- * // Returns /^https:\/\/*.+\.example\.com$/i
+ * Extract host from a URL/origin string (removes protocol).
+ * @param {string} origin - Full URL or origin
+ * @returns {string} Host (hostname[:port])
+ */
+function stripProtocol(origin) {
+  try {
+    const url = new URL(origin);
+    return url.hostname; // hostname without port
+  } catch {
+    // fallback for non-standard inputs
+    return origin.replace(/^[a-z]+:\/\//i, '');
+  }
+}
+
+/**
+ * Convert a domain wildcard pattern to RegExp.
+ * `*` matches within a single domain label (not across dots).
+ * @param {string} pattern - Wildcard pattern (e.g., "*.example.com")
+ * @returns {RegExp} Regex for matching domain patterns
  */
 function patternToRegex(pattern) {
-  // Escape special regex characters except *
-  const regex = pattern
+  const escaped = pattern
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*/g, '.*');
+    .replace(/\*/g, '.*'); // wildcard matches across dots for multi-level subdomains
 
-  return new RegExp(`^${regex}$`, 'i');
+  return new RegExp(`^${escaped}$`, 'i');
 }
 
 /**
  * Check if origin matches allowed pattern (with wildcard support)
+ * Strips protocol from origin for domain-only matching
  * @param {string} origin - Request origin (e.g., https://app.example.com)
- * @param {string[]} allowedOrigins - List of allowed origin patterns
+ * @param {string[]} allowedOrigins - List of domain-only allowed origin patterns
  * @returns {boolean} True if origin is allowed, false otherwise
  * @example
- * isOriginAllowed('https://app.example.com', ['https://*.example.com'])
+ * isOriginAllowed('https://app.example.com', ['*.example.com'])
  * // Returns true
  *
- * isOriginAllowed('https://evil.com', ['https://*.example.com'])
+ * isOriginAllowed('https://evil.com', ['*.example.com'])
  * // Returns false
  *
  * isOriginAllowed('https://any.domain.com', ['*'])
@@ -83,18 +94,21 @@ function patternToRegex(pattern) {
 function isOriginAllowed(origin, allowedOrigins) {
   if (!origin) return false;
 
+  // Strip protocol for domain-only pattern matching
+  const hostname = stripProtocol(origin);
+
   for (const pattern of allowedOrigins) {
     // Wildcard allows all origins
     if (pattern === '*') return true;
 
-    // Exact match
-    if (pattern === origin) return true;
+    // Exact match (domain-only)
+    if (pattern === hostname) return true;
 
     // Wildcard pattern match
     if (pattern.includes('*')) {
       try {
         const regex = patternToRegex(pattern);
-        if (regex.test(origin)) return true;
+        if (regex.test(hostname)) return true;
       } catch {
         // Invalid pattern, skip
       }
@@ -190,11 +204,11 @@ function shouldSkipValidation(path) {
 
 /**
  * Create CORS middleware with dynamic origin based on allowed origins
- * @param {string[]} allowedOrigins - List of allowed origin patterns (can include wildcards)
+ * @param {string[]} allowedOrigins - List of domain-only allowed origin patterns (can include wildcards)
  * @param {import('express').Request} [req] - Express request object for request-scoped logging
  * @returns {import('express').RequestHandler} Express middleware handler
  * @example
- * const middleware = createCorsMiddleware(['https://*.example.com'])
+ * const middleware = createCorsMiddleware(['*.example.com'])
  * app.use(middleware)
  */
 function createCorsMiddleware(allowedOrigins, req) {

@@ -676,17 +676,17 @@ flowchart TD
 | Extensions | `.css`, `.ico`, `.png`, `.jpg`, `.svg`, `.ttf` |
 | Exact Paths | `/`, `/health` |
 
-**Wildcard Origin Patterns (like Mapbox):**
+**Wildcard Origin Patterns (domain-only, no protocol/port):**
 
 | Pattern | Matches |
 |---------|---------|
-| `https://*.example.com` | `https://app.example.com`, `https://www.example.com` |
-| `https://example.com/*` | `https://example.com/map`, `https://example.com/admin/dashboard` |
-| `https://*.example.com/*` | Any subdomain with any path |
+| `*.example.com` | `https://app.example.com`, `https://api.v1.example.com` (any depth) |
+| `example.com` | `https://example.com`, `http://example.com` |
+| `localhost` | `http://localhost:3000`, `https://localhost:8080` (any port) |
 
 **API Endpoint Required:**
 - Endpoint: `GET {AUTH_BASE_URL}/api/validation?api_key={key}`
-- Response: `{ "is_valid": true, "allowed_origins": ["https://domain1.com"] }`
+- Response: `{ "is_valid": true, "allowed_origins": ["domain1.com"] }`
 
 ---
 
@@ -788,7 +788,9 @@ flowchart TB
 ### Origin Validation
 
 - All allowed origins come from the validation API response
-- Supports wildcard patterns like `https://*.example.com`
+- Patterns are domain-only (no protocol, no port) — both `http://` and `https://` match
+- Supports wildcard patterns like `*.example.com` (matches subdomains at any depth)
+- `localhost` pattern matches localhost on any port (3000, 8080, etc.)
 - No fallback to environment variables - API response is single source of truth
 
 ---

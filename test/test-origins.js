@@ -1,37 +1,64 @@
 #!/usr/bin/env node
 /**
- * Manual test script for origin pattern matching
+ * Manual test script for domain-only origin pattern matching
  * Run: node test-origins.js
+ *
+ * Patterns are domain-only (no protocol, no port). Both http:// and https://
+ * origins match the same pattern. Wildcard `*` in patterns like `*.example.com`
+ * matches subdomains at any depth (e.g., app.example.com, api.v1.example.com).
+ * Pattern `localhost` matches localhost on any port (3000, 8080, etc.).
  */
+
+// Copy of stripProtocol from validation.js
+/**
+ * Extract hostname from a URL/origin string (removes protocol and port).
+ * @param {string} origin - Full URL or origin
+ * @returns {string} Hostname without port
+ */
+function stripProtocol(origin) {
+  try {
+    const url = new URL(origin);
+    return url.hostname; // hostname without port
+  } catch {
+    // fallback for non-standard inputs
+    return origin.replace(/^[a-z]+:\/\//i, '');
+  }
+}
 
 // Copy of patternToRegex from validation.js
 /**
- * Converts a wildcard pattern to a regex for origin matching.
- * @param {string} pattern - The wildcard pattern to convert (e.g., 'https://*.example.com')
- * @returns {RegExp} A regex object for matching origins against the pattern
+ * Convert a domain wildcard pattern to RegExp.
+ * `*` matches any characters including across dots (multi-level subdomains).
+ * @param {string} pattern - Wildcard pattern (e.g., "*.example.com")
+ * @returns {RegExp} Regex for matching domain patterns
  */
 function patternToRegex(pattern) {
-  const regex = pattern
+  const escaped = pattern
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*/g, '.*');
-  return new RegExp(`^${regex}$`, 'i');
+    .replace(/\*/g, '.*'); // wildcard matches across dots for multi-level subdomains
+
+  return new RegExp(`^${escaped}$`, 'i');
 }
 
 // Copy of isOriginAllowed from validation.js
 /**
- * Checks if an origin is allowed based on a list of allowed origin patterns.
+ * Checks if an origin is allowed based on a list of domain-only allowed origin patterns.
+ * Strips protocol and port from origin before matching.
  * @param {string} origin - The origin to check (e.g., 'https://example.com')
- * @param {string[]} allowedOrigins - Array of allowed origin patterns (supports wildcards)
+ * @param {string[]} allowedOrigins - Array of domain-only allowed origin patterns (supports wildcards)
  * @returns {boolean} True if the origin is allowed, false otherwise
  */
 function isOriginAllowed(origin, allowedOrigins) {
   if (!origin) return false;
 
+  const hostname = stripProtocol(origin);
+
   for (const pattern of allowedOrigins) {
-    if (pattern === origin) return true;
+    if (pattern === '*') return true;
+    if (pattern === hostname) return true;
     if (pattern.includes('*')) {
       try {
-        if (patternToRegex(pattern).test(origin)) return true;
+        if (patternToRegex(pattern).test(hostname)) return true;
       } catch {
         // Invalid pattern
       }
@@ -40,89 +67,93 @@ function isOriginAllowed(origin, allowedOrigins) {
   return false;
 }
 
-console.log('=== Origin Pattern Matching Test (Mapbox-style) ===\n');
+/**
+ * Run origin matching tests and print results table.
+ * @param {string} title - Test section title
+ * @param {string[]} patterns - Allowed origin patterns
+ * @param {{origin: string, desc: string}[]} testOrigins - Origins to test
+ */
+function runTests(title, patterns, testOrigins) {
+  console.log(`\n=== ${title} ===\n`);
+  console.log('Allowed patterns:');
+  patterns.forEach((p) => console.log(`  - ${p}`));
+  console.log('\n');
 
-console.log('* matches ANY characters (including dots and slashes)\n');
+  console.log('ORIGIN'.padEnd(45) + 'STATUS     DESCRIPTION');
+  console.log('─'.repeat(85));
 
-// Common domain binding patterns
-const patterns = [
-  // Apex domain
-  // 'https://example.com',
+  for (const { origin, desc } of testOrigins) {
+    const allowed = isOriginAllowed(origin, patterns);
+    const status = allowed ? '✓ ALLOWED' : '✗ BLOCKED';
+    console.log(`${origin.padEnd(45)} ${status.padEnd(10)} ${desc}`);
+  }
+  console.log('─'.repeat(85));
+}
 
-  // WWW subdomain
-  // 'https://www.example.com',
+console.log('=== Origin Pattern Matching Test (Domain-Only) ===');
+console.log(
+  'Patterns are domain-only (no protocol, no port). Both http and https match.',
+);
+console.log(
+  '*.example.com matches subdomains at any depth. localhost matches any port.\n',
+);
 
-  // Wildcard - matches all subdomains
-  // 'https://*.example.com',
-
-  // Local development with wildcard port
-  'http://localhost:*',
-
-  // Wildcard with paths - matches all subdomains and paths
-  // '*',
-];
-
-console.log('Allowed patterns:');
-patterns.forEach((p) => console.log(`  - ${p}`));
-console.log('\n');
-
-// Test origins
+// All test origins (browsers always send full origin with protocol)
 const testOrigins = [
-  // Apex domain tests
-  { origin: 'https://example.com', desc: 'Apex domain' },
-  { origin: 'http://example.com', desc: 'Apex (wrong protocol)' },
+  // Apex domain - both protocols match
+  { origin: 'https://example.com', desc: 'Apex domain (https)' },
+  { origin: 'http://example.com', desc: 'Apex domain (http)' },
 
-  // WWW tests
+  // WWW
   { origin: 'https://www.example.com', desc: 'WWW subdomain' },
 
   // Single-level subdomains
   { origin: 'https://app.example.com', desc: 'app subdomain' },
   { origin: 'https://blog.example.com', desc: 'blog subdomain' },
-  { origin: 'https://support.example.com', desc: 'support subdomain' },
   { origin: 'https://api.example.com', desc: 'api subdomain' },
 
-  // Multi-level subdomains
+  // Multi-level subdomains (matched by *.example.com)
   { origin: 'https://api.v1.example.com', desc: 'multi-level subdomain' },
-  { origin: 'https://staging.api.example.com', desc: '3-level subdomain' },
+  {
+    origin: 'https://staging.api.example.com',
+    desc: '3-level subdomain',
+  },
 
-  // With paths
-  { origin: 'https://app.example.com/map', desc: 'subdomain + path' },
-  { origin: 'https://example.com/admin/dashboard', desc: 'apex + deep path' },
-
-  // Local development
+  // Local development - any port on localhost
+  { origin: 'http://localhost', desc: 'localhost (default port)' },
+  { origin: 'https://localhost', desc: 'localhost (https default)' },
   { origin: 'http://localhost:3000', desc: 'localhost:3000' },
-  { origin: 'http://localhost:8080', desc: 'localhost:8080' },
-  { origin: 'https://localhost:3000', desc: 'localhost (wrong protocol)' },
+  { origin: 'https://localhost:8080', desc: 'localhost:8080' },
 
   // Should be blocked
   { origin: 'https://evil.com', desc: 'Different domain' },
-  { origin: 'https://example.com.evil.com', desc: 'Phishing attempt' },
+  {
+    origin: 'https://example.com.evil.com',
+    desc: 'Phishing attempt',
+  },
 ];
 
-console.log('Testing origins:\n');
-console.log('ORIGIN'.padEnd(45) + 'STATUS     DESCRIPTION');
-console.log('─'.repeat(85));
+// Test: Matches the API response pattern
+runTests(
+  'Domain-Only Patterns (matches API response)',
+  [
+    'example.com',
+    'www.example.com',
+    '*.example.com',
+    'localhost',
+    'staging.api.example.com',
+  ],
+  testOrigins,
+);
 
-for (const { origin, desc } of testOrigins) {
-  const allowed = isOriginAllowed(origin, patterns);
-  const status = allowed ? '✓ ALLOWED' : '✗ BLOCKED';
-  console.log(`${origin.padEnd(45)} ${status.padEnd(10)} ${desc}`);
-}
-
-console.log('\n' + '─'.repeat(85));
-
-// Summary: what patterns to use for common scenarios
-console.log('\n=== Recommended Patterns ===\n');
+// Recommended patterns
+console.log('\n=== Recommended Patterns (Domain-Only) ===\n');
 console.log('Scenario                                    Pattern');
 console.log('─'.repeat(70));
-console.log('Single domain                               https://example.com');
+console.log('Single domain                               example.com');
+console.log('All subdomains (any depth)                  *.example.com');
 console.log(
-  'All subdomains (app, www, api, etc.)        https://*.example.com',
+  'Specific subdomain                          staging.api.example.com',
 );
-console.log('Local dev (any port)                        http://localhost:*');
-console.log(
-  'Local dev (specific port)                   http://localhost:3000',
-);
-console.log(
-  'Everything on domain (subdomains + paths)   https://*.example.com/*',
-);
+console.log('Local dev (any port)                        localhost');
+console.log('Allow all origins                           *');
