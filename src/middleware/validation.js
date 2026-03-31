@@ -282,7 +282,8 @@ export async function validationMiddleware(req, res, next) {
 
   // Skip validation for static assets
   if (shouldSkipValidation(req.path)) {
-    return next();
+    // return next();
+    return skipValidationCorsMiddleware(req, res, next);
   }
 
   // Get API Key from query param
