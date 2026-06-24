@@ -252,25 +252,89 @@ function createCorsMiddleware(allowedOrigins, req) {
 }
 
 /**
- * Express middleware for API Key validation + CORS
+ * Apply CORS to the response and continue. Shared by both auth handlers.
  *
- * Flow:
- * 1. Skip validation for static assets (based on file extension)
- * 2. Check for API key in query parameter `key`
- * 3. Validate API key against external service
- * 4. Apply CORS with combined allowed origins (global + key-specific)
+ * On OPTIONS, the CORS middleware short-circuits with 204 No Content.
+ * Otherwise it decorates the response and yields to the next middleware.
+ *
+ * @param {string[]} allowedOrigins - Origins to permit (passed to createCorsMiddleware)
+ * @param {import('express').Request} req - Express request object
+ * @param {import('express').Response} res - Express response object
+ * @param {import('express').NextFunction} next - Express next function
+ * @returns {void}
+ */
+function applyCorsAndContinue(allowedOrigins, req, res, next) {
+  const corsMiddleware = createCorsMiddleware(allowedOrigins, req);
+  if (req.method === 'OPTIONS') {
+    return corsMiddleware(req, res, () => res.status(204).end());
+  }
+  return corsMiddleware(req, res, next);
+}
+
+/**
+ * Static-mode auth handler.
+ * Validates ?key= against config.auth.accessTokens (any match authenticates);
+ * applies CORS from config.cors.allowedOrigins. No call to AUTH_BASE_URL.
  * @param {import('express').Request} req - Express request object
  * @param {import('express').Response} res - Express response object
  * @param {import('express').NextFunction} next - Express next function
  * @returns {Promise<void>}
- * @throws {never} Responds with 401 for missing/invalid API key
+ */
+async function handleStaticAuth(req, res, next) {
+  const token = req.query.key;
+  if (!token || !config.auth.accessTokens.includes(token)) {
+    res.locals.errorMessage = 'Invalid token';
+    getLogger(req).warn(
+      {
+        origin: req.headers.origin,
+        keyPrefix: token ? String(token).substring(0, 8) + '...' : null,
+      },
+      'Static auth: invalid token',
+    );
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+
+  return applyCorsAndContinue(config.cors.allowedOrigins, req, res, next);
+}
+
+/**
+ * Dynamic-mode auth handler (existing behavior, extracted verbatim).
+ * Validates ?key= via AUTH_BASE_URL; applies CORS from API response.
+ * @param {import('express').Request} req - Express request object
+ * @param {import('express').Response} res - Express response object
+ * @param {import('express').NextFunction} next - Express next function
+ * @returns {Promise<void>}
+ */
+async function handleDynamicAuth(req, res, next) {
+  const apiKey = req.query.key;
+  if (!apiKey) {
+    res.locals.errorMessage = 'Missing API Key';
+    return res.status(401).json({ error: 'Missing API Key' });
+  }
+
+  const result = await validateApiKey(apiKey, req);
+  if (!result.is_valid) {
+    res.locals.errorMessage = 'Invalid API Key';
+    return res.status(401).json({ error: 'Invalid API Key' });
+  }
+
+  return applyCorsAndContinue(result.allowed_origins, req, res, next);
+}
+
+/**
+ * Express middleware: API key validation + CORS.
+ *
+ * Shared prelude (skip-validation, OPTIONS preflight for skipped paths) runs
+ * for both modes. Dispatches to the mode-specific handler based on
+ * config.auth.mode.
+ * @param {import('express').Request} req - Express request object
+ * @param {import('express').Response} res - Express response object
+ * @param {import('express').NextFunction} next - Express next function
+ * @returns {Promise<void>}
  * @example
  * // In your Express app:
  * import { validationMiddleware } from './middleware/validation.js'
  * app.use(validationMiddleware)
- * @example
- * // Request with API key:
- * // GET /tiles/1/2/3.pbf?key=my-api-key
  */
 export async function validationMiddleware(req, res, next) {
   // Handle OPTIONS preflight for skipped validation paths
@@ -282,34 +346,12 @@ export async function validationMiddleware(req, res, next) {
 
   // Skip validation for static assets
   if (shouldSkipValidation(req.path)) {
-    // return next();
     return skipValidationCorsMiddleware(req, res, next);
   }
 
-  // Get API Key from query param
-  const apiKey = req.query.key;
-  if (!apiKey) {
-    res.locals.errorMessage = 'Missing API Key';
-    return res.status(401).json({ error: 'Missing API Key' });
+  // Mode dispatch (decided once at config-load)
+  if (config.auth.mode === 'static') {
+    return handleStaticAuth(req, res, next);
   }
-
-  // Validate API Key and get allowed origins (pass req for request-scoped logging)
-  const result = await validateApiKey(apiKey, req);
-  if (!result.is_valid) {
-    res.locals.errorMessage = 'Invalid API Key';
-    return res.status(401).json({ error: 'Invalid API Key' });
-  }
-
-  // Apply CORS with validated origins (pass req for request-scoped logging)
-  const corsMiddleware = createCorsMiddleware(result.allowed_origins, req);
-
-  // Handle OPTIONS preflight for authenticated paths
-  if (req.method === 'OPTIONS') {
-    return corsMiddleware(req, res, () => {
-      res.status(204).end();
-    });
-  }
-
-  // Apply CORS and continue to next middleware
-  corsMiddleware(req, res, next);
+  return handleDynamicAuth(req, res, next);
 }
