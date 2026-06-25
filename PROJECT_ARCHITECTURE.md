@@ -59,34 +59,34 @@ Complete technical documentation for understanding and forking this project comm
 ```mermaid
 flowchart TB
     subgraph Entry
-        CLI[main.js CLI]
+        CLI["main.js CLI"]
     end
 
-    subgraph Server[server.js]
-        SRV[Express App]
-        MW[Middleware Stack]
-        ROUTES[Route Handlers]
+    subgraph Server["server.js"]
+        SRV["Express App"]
+        MW["Middleware Stack"]
+        ROUTES["Route Handlers"]
     end
 
     subgraph Middleware
-        LOG[httpLogger - Pino]
-        VAL[validationMiddleware]
+        LOG["httpLogger - Pino"]
+        VAL["validationMiddleware"]
     end
 
-    subgraph SubApps[Sub-Applications]
+    subgraph SubApps["Sub-Applications"]
         DATA["serve_data.js (data)"]
         STYLE["serve_style.js (styles)"]
         RENDER["serve_rendered.js (rendered)"]
         FONT["serve_font.js (fonts)"]
     end
 
-    subgraph DataSources[Data Sources]
-        MB[MBTiles - Local]
-        PM[PMTiles - Local/HTTP/S3]
+    subgraph DataSources["Data Sources"]
+        MB["MBTiles - Local"]
+        PM["PMTiles - Local/HTTP/S3"]
     end
 
-    subgraph RenderEngine[Rendering]
-        MLN[MapLibre GL Native]
+    subgraph RenderEngine["Rendering"]
+        MLN["MapLibre GL Native"]
         POOL["Renderer Pools (1x, 2x, 3x)"]
     end
 
@@ -138,7 +138,7 @@ Each sub-app is a separate Express application mounted at a specific path:
 
 ```mermaid
 flowchart LR
-    subgraph MainApp[Main App - server.js]
+    subgraph MainApp["Main App - server.js"]
         MW["Middleware: trust proxy, httpLogger, validation"]
         R1["Routes: styles.json, data.json, health"]
     end
@@ -207,12 +207,12 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    subgraph server.js
-        A[Express App Initialization] --> B[Middleware Setup]
-        B --> C[Sub-app Mounting]
-        C --> D[Style Loading]
-        D --> E[Data Loading]
-        E --> F[Template Routes]
+    subgraph serverjs["server.js"]
+        A["Express App Initialization"] --> B["Middleware Setup"]
+        B --> C["Sub-app Mounting"]
+        C --> D["Style Loading"]
+        D --> E["Data Loading"]
+        E --> F["Template Routes"]
     end
 
     subgraph SubApps
@@ -273,18 +273,18 @@ flowchart TD
 
 ```mermaid
 flowchart TB
-    subgraph Pools[Renderer Pools]
-        P1[Tile Pool @1x: 8-16 renderers]
-        P2[Tile Pool @2x: 4-8 renderers]
-        P3[Tile Pool @3x: 2-4 renderers]
-        P4[Static Pool @1x: 8-16 renderers]
-        P5[Static Pool @2x: 4-8 renderers]
-        P6[Static Pool @3x: 2-4 renderers]
+    subgraph Pools["Renderer Pools"]
+        P1["Tile Pool @1x: 8-16 renderers"]
+        P2["Tile Pool @2x: 4-8 renderers"]
+        P3["Tile Pool @3x: 2-4 renderers"]
+        P4["Static Pool @1x: 8-16 renderers"]
+        P5["Static Pool @2x: 4-8 renderers"]
+        P6["Static Pool @3x: 2-4 renderers"]
     end
 
     subgraph Modes
-        T[Tile Mode]
-        S[Static Mode]
+        T["Tile Mode"]
+        S["Static Mode"]
     end
 
     T --> P1
@@ -367,11 +367,16 @@ flowchart TB
 
 | Section | Setting | Source | Default |
 |---------|---------|--------|---------|
-| auth | baseUrl | `AUTH_BASE_URL` env | `''` |
+| auth | mode | `AUTH_MODE` env | `dynamic` (backward compatible) |
+| auth | baseUrl | `AUTH_BASE_URL` env | `''` (required when `mode=dynamic`) |
 | auth | timeout | hardcoded | `5000ms` |
+| auth | accessTokens | `ACCESS_TOKEN` env (comma-separated) | `[]` (required when `mode=static`) |
 | cors | isCheckAllowedOrigins | `IS_CHECK_ALLOWED_ORIGINS` env | `true` |
+| cors | allowedOrigins | `ALLOWED_ORIGINS` env (comma-separated) | `[]` (used when `mode=static`) |
 | validation | skipExtensions | hardcoded | `.css, .ico, .png, .jpg, .svg, .ttf` |
 | validation | skipPaths | hardcoded | `/, /health` |
+
+**Fail-fast Validation:** `validateConfig(cfg)` runs at module load and throws `FATAL: ...` if (a) `AUTH_MODE` is anything other than `static` or `dynamic`, (b) `AUTH_MODE=static` is selected without `ACCESS_TOKEN`, or (c) `AUTH_MODE=dynamic` is selected without `AUTH_BASE_URL`. Misconfiguration aborts startup.
 
 ---
 
@@ -499,64 +504,64 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A[Client Request: GET /data/v3/10/512/384.pbf?key=xxx] --> B[Express App]
-    B --> C[httpLogger]
-    C --> D[validationMiddleware]
-    D --> E{API Key Valid?}
-    E -->|No| F[401 Response]
-    E -->|Yes| G[serve_data.js sub-app]
-    G --> H[Lookup source in repo]
-    H --> I[Validate coordinates]
-    I --> J[fetchTileData]
-    J --> K{Source Type?}
-    K -->|pmtiles| L[pmtiles_adapter]
-    K -->|mbtiles| M[mbtiles.getTile]
-    L --> N[Response Processing]
+    A["Client Request: GET /data/v3/10/512/384.pbf?key=xxx"] --> B["Express App"]
+    B --> C["httpLogger"]
+    C --> D["validationMiddleware"]
+    D --> E{"API Key Valid?"}
+    E -->|No| F["401 Response"]
+    E -->|Yes| G["serve_data.js sub-app"]
+    G --> H["Lookup source in repo"]
+    H --> I["Validate coordinates"]
+    I --> J["fetchTileData"]
+    J --> K{"Source Type?"}
+    K -->|pmtiles| L["pmtiles_adapter"]
+    K -->|mbtiles| M["mbtiles.getTile"]
+    L --> N["Response Processing"]
     M --> N
-    N --> O[Gunzip if needed]
-    O --> P[Apply dataDecoratorFunc]
-    P --> Q[Gzip response]
-    Q --> R[Return Buffer]
+    N --> O["Gunzip if needed"]
+    O --> P["Apply dataDecoratorFunc"]
+    P --> Q["Gzip response"]
+    Q --> R["Return Buffer"]
 ```
 
 ### Rendered Tile Request Flow
 
 ```mermaid
 flowchart TD
-    A[Client Request: GET /styles/basic/10/512/384.png] --> B[serve_rendered.js]
-    B --> C[Lookup renderer pool]
-    C --> D[Calculate tile center]
-    D --> E[respondImage]
-    E --> F[Validate parameters]
-    F --> G[Acquire renderer from pool]
-    G --> H[renderer.render]
-    H --> I[MapLibre GL Native]
-    I --> J[Internal tile/font/sprite requests]
-    J --> K[Return RGBA buffer]
-    K --> L[Sharp Image Processing]
-    L --> M[Convert to PNG/JPEG/WebP]
-    M --> N[Apply overlays]
-    N --> O[Set headers]
-    O --> P[Send image buffer]
+    A["Client Request: GET /styles/basic/10/512/384.png"] --> B["serve_rendered.js"]
+    B --> C["Lookup renderer pool"]
+    C --> D["Calculate tile center"]
+    D --> E["respondImage"]
+    E --> F["Validate parameters"]
+    F --> G["Acquire renderer from pool"]
+    G --> H["renderer.render"]
+    H --> I["MapLibre GL Native"]
+    I --> J["Internal tile/font/sprite requests"]
+    J --> K["Return RGBA buffer"]
+    K --> L["Sharp Image Processing"]
+    L --> M["Convert to PNG/JPEG/WebP"]
+    M --> N["Apply overlays"]
+    N --> O["Set headers"]
+    O --> P["Send image buffer"]
 ```
 
 ### Style Loading Flow
 
 ```mermaid
 flowchart TD
-    A[Config: styles + data] --> B[server.js: addStyle]
-    B --> C[Read style JSON]
-    C --> D[For each source]
-    D --> E{Parse URL}
-    E -->|mbtiles://| F[Resolve to data source ID]
+    A["Config: styles + data"] --> B["server.js: addStyle"]
+    B --> C["Read style JSON"]
+    C --> D["For each source"]
+    D --> E{"Parse URL"}
+    E -->|mbtiles://| F["Resolve to data source ID"]
     E -->|pmtiles://| F
     E -->|http://| F
-    F --> G{serve_data?}
-    G -->|Yes| H[serve_style.add]
-    G -->|No| I{serve_rendered?}
+    F --> G{"serve_data?"}
+    G -->|Yes| H["serve_style.add"]
+    G -->|No| I{"serve_rendered?"}
     H --> I
-    I -->|Yes| J[serve_rendered.add]
-    I -->|No| K[Done]
+    I -->|Yes| J["serve_rendered.add"]
+    I -->|No| K["Done"]
     J --> K
 ```
 
@@ -623,14 +628,14 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    A[Request] --> B[disable x-powered-by]
-    B --> C[enable trust proxy]
-    C --> D[httpLogger - Pino]
-    D --> E[validationMiddleware]
-    E --> F[express.static]
-    F --> G[Sub-apps]
-    G --> H[Template routes]
-    H --> I[Response]
+    A["Request"] --> B["disable x-powered-by"]
+    B --> C["enable trust proxy"]
+    C --> D["httpLogger - Pino"]
+    D --> E["validationMiddleware"]
+    E --> F["express.static"]
+    F --> G["Sub-apps"]
+    G --> H["Template routes"]
+    H --> I["Response"]
 ```
 
 ### Middleware Details
@@ -645,31 +650,45 @@ flowchart LR
 
 ### Validation Middleware
 
-**Purpose:** API Key validation with external service and CORS handling
+**Purpose:** Auth (API key or static token) + CORS middleware with mode dispatch
+
+**Modes (selected once at config-load via `config.auth.mode`):**
+- `dynamic` (default, backward-compatible) — validates `?key=` via `AUTH_BASE_URL/api/validation`; allowed origins come from the response.
+- `static` — validates `?key=` against `config.auth.accessTokens` (`ACCESS_TOKEN`); allowed origins come from `config.cors.allowedOrigins` (`ALLOWED_ORIGINS`). No external call.
+
+`validationMiddleware` runs the shared prelude (skip-validation, OPTIONS preflight for skipped paths) for both modes, then dispatches to `handleStaticAuth` or `handleDynamicAuth`. Both handlers share `applyCorsAndContinue`, which applies the per-mode CORS middleware and short-circuits OPTIONS to 204.
 
 **Features:**
-- Timeout protection (5s) for API key validation
+- Mode dispatch in `validationMiddleware` (shared prelude + branch to `handleStaticAuth` / `handleDynamicAuth`)
+- Timeout protection (5s) for API key validation (dynamic mode only)
 - Request-scoped logging via `req.log` from pino-http
-- CORS middleware creation based on validation response
+- CORS middleware creation based on per-mode allowed origins
 - Configurable skip paths for static assets
 
 **Validation Flow:**
 
 ```mermaid
 flowchart TD
-    A[Incoming Request] --> B{Skip Validation?}
-    B -->|Yes: Static Assets| C[Next Middleware]
-    B -->|Yes: Public Paths| C
-    B -->|No| D{API Key in Query?}
-    D -->|No| E[401: Missing API Key]
-    D -->|Yes| F["Validate API Key (5s timeout)"]
-    F --> G{Valid?}
-    G -->|No| H[401: Invalid API Key]
-    G -->|Yes| I["Create CORS Middleware (with allowed origins)"]
+    A["Incoming request"] --> B{"Skip validation?"}
+    B -->|"Static assets, public paths"| C["Next middleware"]
+    B -->|"OPTIONS on skip path"| C
+    B -->|No| D{"config.auth.mode"}
+    D -->|static| E["handleStaticAuth"]
+    D -->|dynamic| F["handleDynamicAuth"]
+    E --> G{"key in ACCESS_TOKEN?"}
+    G -->|No| H["401 Invalid token"]
+    G -->|Yes| I["applyCorsAndContinue with ALLOWED_ORIGINS"]
+    F --> J{"key present?"}
+    J -->|No| K["401 Missing API Key"]
+    J -->|Yes| L["validateApiKey via AUTH_BASE_URL (5s timeout)"]
+    L --> M{"is_valid?"}
+    M -->|No| N["401 Invalid API Key"]
+    M -->|Yes| O["applyCorsAndContinue with allowed_origins"]
     I --> C
+    O --> C
 ```
 
-**Public Paths (no validation):**
+**Public Paths (no validation, both modes):**
 
 | Type | Paths |
 |------|-------|
@@ -684,9 +703,15 @@ flowchart TD
 | `example.com` | `https://example.com`, `http://example.com` |
 | `localhost` | `http://localhost:3000`, `https://localhost:8080` (any port) |
 
-**API Endpoint Required:**
-- Endpoint: `GET {AUTH_BASE_URL}/api/validation?api_key={key}`
-- Response: `{ "is_valid": true, "allowed_origins": ["domain1.com"] }`
+**Dynamic-mode requirements** (`AUTH_MODE=dynamic`, default):
+- `AUTH_BASE_URL` must be set.
+- Endpoint called: `GET {AUTH_BASE_URL}/api/validation?api_key={key}`
+- Response shape: `{ "is_valid": true, "allowed_origins": ["domain1.com"] }`
+
+**Static-mode requirements** (`AUTH_MODE=static`):
+- `ACCESS_TOKEN` — single token or comma-separated list; client must send a matching value as `?key=<token>`.
+- `ALLOWED_ORIGINS` — comma-separated domain-only patterns with wildcard support (same pattern syntax as dynamic mode's `allowed_origins`); `*` allows all.
+- No external call is made; `AUTH_BASE_URL` is ignored.
 
 ---
 
@@ -771,27 +796,30 @@ flowchart TB
 |---------|----------|--------|
 | Hide X-Powered-By | server.js | ✅ Implemented |
 | Trust Proxy | server.js | ⚠️ Enabled (configurable) |
-| API Key Authentication | middleware/validation.js | ✅ Implemented |
+| API Key / Token Authentication | middleware/validation.js | ✅ Static or dynamic mode |
 | CORS with Origin Control | middleware/validation.js | ✅ Wildcard pattern support |
 | Input Sanitization | Multiple | ✅ Removes `\n\r` |
 | Path Sanitization | serve_rendered.js | ✅ Uses sanitize-filename |
 | Bounds Validation | serve_data.js | ✅ Validates tile coords |
 | Sprite Path Sanitization | serve_style.js | ✅ Removes `../` |
-| Request Timeout | middleware/validation.js | ✅ 5s timeout for API validation |
+| Request Timeout | middleware/validation.js | ✅ 5s timeout for API validation (dynamic mode) |
 
-### API Key Authentication
+### API Key / Token Authentication
 
-- **Parameter:** `?key=xxx` query parameter
+- **Parameter:** `?key=xxx` query parameter (both modes)
+- **Static mode** (`AUTH_MODE=static`): `?key=` must match one of the `ACCESS_TOKEN` entries. Validated in-process; no network call.
+- **Dynamic mode** (`AUTH_MODE=dynamic`, default): `?key=` is validated via `AUTH_BASE_URL/api/validation`; allowed origins come from the response.
 - **Protected routes:** All except public paths
 - **Public routes:** `/`, `/health`, and static assets (`.css`, `.ico`, `.png`, `.jpg`, `.svg`, `.ttf`)
+- **Fail-fast at startup:** `app.config.js` (`validateConfig`) refuses to start if the selected mode is missing its required env var (`ACCESS_TOKEN` for static, `AUTH_BASE_URL` for dynamic) or if `AUTH_MODE` is set to an invalid value.
 
 ### Origin Validation
 
-- All allowed origins come from the validation API response
+- The source of allowed origins depends on mode: `ALLOWED_ORIGINS` for static, validation-API response for dynamic.
 - Patterns are domain-only (no protocol, no port) — both `http://` and `https://` match
 - Supports wildcard patterns like `*.example.com` (matches subdomains at any depth)
 - `localhost` pattern matches localhost on any port (3000, 8080, etc.)
-- No fallback to environment variables - API response is single source of truth
+- `IS_CHECK_ALLOWED_ORIGINS=false` overrides both modes to serve CORS `'*'`; `?key=` auth is still enforced.
 
 ---
 
@@ -809,9 +837,12 @@ Docker is the recommended way to develop and run this project to avoid environme
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `TZ` | Timezone | `Asia/Dhaka` |
-| `AUTH_BASE_URL` | Base URL for validation API | `http://host.docker.internal:5010` |
-| `IS_CHECK_ALLOWED_ORIGINS` | Set to `false` to allow all origins | `true` |
+| `AUTH_MODE` | `static` or `dynamic`. Unset = `dynamic`. Any other value → server refuses to start. | `dynamic` |
+| `TZ` | IANA timezone (consumed via env_file) | `Asia/Dhaka` |
+| `AUTH_BASE_URL` | Validation API base URL. Required when `AUTH_MODE=dynamic`. Ignored in static mode. | `http://host.docker.internal:5010` |
+| `ACCESS_TOKEN` | Static token(s). Single or comma-separated list; any match authenticates. Required when `AUTH_MODE=static`. | `secret-token-123` |
+| `ALLOWED_ORIGINS` | Comma-separated allowed origins for CORS in static mode. Domain-only with wildcards; `*` allows all. | `*.example.com,localhost` |
+| `IS_CHECK_ALLOWED_ORIGINS` | `false` → allow ALL origins (CORS `'*'`) in both modes. Auth still enforced. | `true` |
 
 **Docker Commands:**
 
@@ -838,11 +869,12 @@ docker-compose down
 | Volume | `.` → `/data` |
 | Memory Limit | `8G` |
 
-**Local Development with External Auth Service:**
+**Local Development with External Auth Service (dynamic mode):**
 
-For connecting to a local auth service running outside Docker:
-- Set `AUTH_BASE_URL=http://host.docker.internal:5010`
+For connecting to a local auth service running outside Docker in `AUTH_MODE=dynamic`:
+- Set `AUTH_MODE=dynamic` (or leave unset) and `AUTH_BASE_URL=http://host.docker.internal:5010`
 - `host.docker.internal` resolves to the host machine from inside the container
+- For `AUTH_MODE=static`, no external service is needed — set `ACCESS_TOKEN` and `ALLOWED_ORIGINS` instead
 
 ### Start Server (Native)
 
@@ -868,8 +900,11 @@ node src/main.js -c config.json -p 8080 --verbose 2 --cors
 | `PORT` | Override default port |
 | `BIND` | Override bind address |
 | `UV_THREADPOOL_SIZE` | Thread pool size (auto-calculated) |
-| `AUTH_BASE_URL` | Base URL for validation API |
-| `IS_CHECK_ALLOWED_ORIGINS` | Set to `false` to allow all origins |
+| `AUTH_MODE` | `static` or `dynamic` (default). Selects auth strategy. |
+| `AUTH_BASE_URL` | Validation API base URL (required when `AUTH_MODE=dynamic`, ignored otherwise) |
+| `ACCESS_TOKEN` | Static token(s) for `AUTH_MODE=static` (comma-separated for multiple) |
+| `ALLOWED_ORIGINS` | Comma-separated allowed origins for `AUTH_MODE=static` |
+| `IS_CHECK_ALLOWED_ORIGINS` | Set to `false` to allow all origins (both modes) |
 | `TZ` | Timezone for logs |
 
 ### Test Commands
